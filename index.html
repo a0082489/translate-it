@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>翻訳完全修正版 - 安定リアルタイム翻訳アプリ</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css">
+    <style>
+        .recording-pulse {
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.1); opacity: 0.7; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .history-item {
+            border-left: 3px solid #3B82F6;
+            padding-left: 12px;
+            margin: 8px 0;
+        }
+        .info-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto p-4">
+        <div class="text-center mb-6">
+            <h1 class="text-3xl font-bold text-gray-800 mb-2">
+                <i class="fas fa-language mr-2"></i>リアルタイム翻訳アプリ
+            </h1>
+            <p class="text-gray-600">音声認識・翻訳・関連情報を統合</p>
+        </div>
+
+        <!-- 音声認識コントロール -->
+        <div class="bg-white rounded-lg shadow-lg p-6 mb-6">
+            <div class="text-center">
+                <button id="recordButton" class="bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-8 rounded-full text-xl transition-all duration-300">
+                    <i class="fas fa-microphone mr-2"></i>音声認識開始
+                </button>
+                <div id="recordingStatus" class="mt-4 text-lg font-semibold hidden">
+                    <span class="recording-pulse inline-block w-4 h-4 bg-red-500 rounded-full mr-2"></span>
+                    録音中...
+                </div>
+            </div>
+        </div>
+
+        <!-- メインコンテンツエリア -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- 音声認識・翻訳履歴 -->
+            <div class="lg:col-span-1">
+                <div class="bg-white rounded-lg shadow-lg p-4 mb-4">
+                    <h3 class="text-lg font-semibold mb-3 text-gray-800">
+                        <i class="fas fa-microphone mr-2"></i>音声認識結果
+                    </h3>
+                    <div id="speechResult" class="bg-gray-50 p-3 rounded min-h-20 text-gray-700">
+                        音声認識を開始してください...
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-lg shadow-lg p-4">
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="text-lg font-semibold text-gray-800">
+                            <i class="fas fa-history mr-2"></i>翻訳履歴
+                        </h3>
+                        <button id="clearHistoryButton" class="text-red-500 hover:text-red-700">
+                            <i class="fas fa-trash-alt"></i>
+                        </button>
+                    </div>
+                    <div id="translationHistory" class="max-h-64 overflow-y-auto">
+                        <p class="text-gray-500 text-sm">翻訳履歴がここに表示されます</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 翻訳結果 -->
+            <div class="lg:col-span-1">
+                <div class="bg-white rounded-lg shadow-lg p-4">
+                    <h3 class="text-lg font-semibold mb-3 text-gray-800">
+                        <i class="fas fa-exchange-alt mr-2"></i>翻訳結果
+                    </h3>
+                    <div class="mb-4">
+                        <label class="text-sm text-gray-600">翻訳方向:</label>
+                        <select id="translationDirection" class="ml-2 p-2 border rounded">
+                            <option value="ja-en">日本語 → 英語</option>
+                            <option value="en-ja">英語 → 日本語</option>
+                            <option value="auto">自動検出</option>
+                        </select>
+                    </div>
+                    <div id="translationResult" class="bg-blue-50 p-4 rounded min-h-32 text-gray-700 text-lg">
+                        翻訳結果がここに表示されます
+                    </div>
+                    <div id="translationStatus" class="mt-2 text-sm text-gray-500"></div>
+                </div>
+            </div>
+
+            <!-- 関連情報 -->
+            <div class="lg:col-span-1">
+                <div class="info-card rounded-lg shadow-lg p-4">
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="text-lg font-semibold text-white">
+                            <i class="fas fa-info-circle mr-2"></i>関連情報
+                        </h3>
+                        <button id="nextInfoButton" class="text-white hover:text-gray-200">
+                            <i class="fas fa-refresh"></i>
+                        </button>
+                    </div>
+                    <div id="relatedInfo" class="text-white text-sm leading-relaxed min-h-48">
+                        関連情報を取得中...
+                    </div>
+                    <div class="mt-3 text-xs text-gray-200">
+                        <span id="infoTimer">次の更新まで: 30秒</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class ConversationTranslator {
+            constructor() {
+                this.recognition = null;
+                this.isRecording = false;
+                this.translationHistory = [];
+                this.currentInfoIndex = 0;
+                this.infoTimer = 30;
+                this.infoInterval = null;
+                
+                this.initSpeechRecognition();
+                this.initEventListeners();
+                this.startInfoTimer();
+                this.loadInitialInfo();
+            }
+
+            initSpeechRecognition() {
+                if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+                    this.recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+                    this.recognition.continuous = true;
+                    this.recognition.interimResults = true;
+                    this.recognition.lang = 'ja-JP';
+
+                    this.recognition.onstart = () => {
+                        this.isRecording = true;
+                        this.updateRecordingUI();
+                    };
+
+                    this.recognition.onend = () => {
+                        this.isRecording = false;
+                        this.updateRecordingUI();
+                    };
+
+                    this.recognition.onresult = (event) => {
+                        let finalTranscript = '';
+                        for (let i = event.resultIndex; i < event.results.length; i++) {
+                            if (event.results[i].isFinal) {
+                                finalTranscript += event.results[i][0].transcript;
+                            }
+                        }
+
+                        if (finalTranscript.trim()) {
+                            document.getElementById('speechResult').textContent = finalTranscript;
+                            this.translateText(finalTranscript);
+                        }
+                    };
+
+                    this.recognition.onerror = (event) => {
+                        console.error('音声認識エラー:', event.error);
+                        document.getElementById('speechResult').textContent = '音声認識エラーが発生しました';
+                    };
+                }
+            }
+
+            initEventListeners() {
+                document.getElementById('recordButton').addEventListener('click', () => {
+                    this.toggleRecording();
+                });
+
+                document.getElementById('clearHistoryButton').addEventListener('click', () => {
+                    this.clearHistory();
+                });
+
+                document.getElementById('nextInfoButton').addEventListener('click', () => {
+                    this.loadNextInfo();
+                });
+
+                document.getElementById('translationDirection').addEventListener('change', (e) => {
+                    if (e.target.value === 'ja-JP' || e.target.value === 'auto') {
+                        this.recognition.lang = 'ja-JP';
+                    } else {
+                        this.recognition.lang = 'en-US';
+                    }
+                });
+            }
+
+            toggleRecording() {
+                if (!this.recognition) {
+                    alert('音声認識がサポートされていません');
+                    return;
+                }
+
+                if (this.isRecording) {
+                    this.recognition.stop();
+                } else {
+                    this.recognition.start();
+                }
+            }
+
+            updateRecordingUI() {
+                const button = document.getElementById('recordButton');
+                const status = document.getElementById('recordingStatus');
+
+                if (this.isRecording) {
+                    button.innerHTML = '<i class="fas fa-stop mr-2"></i>音声認識停止';
+                    button.className = 'bg-red-500 hover:bg-red-600 text-white font-bold py-4 px-8 rounded-full text-xl transition-all duration-300';
+                    status.classList.remove('hidden');
+                } else {
+                    button.innerHTML = '<i class="fas fa-microphone mr-2"></i>音声認識開始';
+                    button.className = 'bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-8 rounded-full text-xl transition-all duration-300';
+                    status.classList.add('hidden');
+                }
+            }
+
+            async translateText(text) {
+                const direction = document.getElementById('translationDirection').value;
+                const statusEl = document.getElementById('translationStatus');
+                const resultEl = document.getElementById('translationResult');
+                
+                statusEl.textContent = '翻訳中...';
+                
+                try {
+                    let translatedText = await this.performTranslation(text, direction);
+                    
+                    resultEl.textContent = translatedText;
+                    statusEl.textContent = '翻訳完了';
+                    
+                    // 翻訳履歴に追加
+                    this.addToHistory(text, translatedText);
+                    
+                } catch (error) {
+                    console.error('翻訳エラー:', error);
+                    statusEl.textContent = '翻訳エラーが発生しました';
+                    resultEl.textContent = 'フォールバック翻訳: ' + this.fallbackTranslation(text, direction);
+                }
+            }
+
+            async performTranslation(text, direction) {
+                // 複数の翻訳手段を試行
+                const methods = [
+                    () => this.googleTranslateAPI(text, direction),
+                    () => this.libreTranslateAPI(text, direction),
+                    () => this.dictionaryTranslation(text, direction)
+                ];
+
+                for (let method of methods) {
+                    try {
+                        const result = await method();
+                        if (result && result.trim()) {
+                            return result;
+                        }
+                    } catch (error) {
+                        console.warn('翻訳方法が失敗:', error);
+                    }
+                }
+
+                throw new Error('すべての翻訳方法が失敗しました');
+            }
+
+            async googleTranslateAPI(text, direction) {
+                // Google Translate Web版を使用（CORSの問題を回避）
+                const sourceLang = direction === 'ja-en' || direction === 'auto' && this.isJapanese(text) ? 'ja' : 'en';
+                const targetLang = sourceLang === 'ja' ? 'en' : 'ja';
+                
+                const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sourceLang}&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
+                
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data && data[0] && data[0][0] && data[0][0][0]) {
+                    return data[0][0][0];
+                }
+                
+                throw new Error('Google Translate API失敗');
+            }
+
+            async libreTranslateAPI(text, direction) {
+                // LibreTranslate公開API
+                const sourceLang = direction === 'ja-en' || direction === 'auto' && this.isJapanese(text) ? 'ja' : 'en';
+                const targetLang = sourceLang === 'ja' ? 'en' : 'ja';
+                
+                const response = await fetch('https://libretranslate.de/translate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        q: text,
+                        source: sourceLang,
+                        target: targetLang
+                    })
+                });
+                
+                const data = await response.json();
+                if (data && data.translatedText) {
+                    return data.translatedText;
+                }
+                
+                throw new Error('LibreTranslate API失敗');
+            }
+
+            dictionaryTranslation(text, direction) {
+                // 簡易辞書ベース翻訳（フォールバック）
+                const dictionary = {
+                    'ja-en': {
+                        'こんにちは': 'Hello',
+                        'おはよう': 'Good morning',
+                        'ありがとう': 'Thank you',
+                        'すみません': 'Excuse me',
+                        'はい': 'Yes',
+                        'いいえ': 'No',
+                        '今日': 'Today',
+                        '明日': 'Tomorrow',
+                        '天気': 'Weather',
+                        '忙しい': 'Busy'
+                    },
+                    'en-ja': {
+                        'hello': 'こんにちは',
+                        'good morning': 'おはようございます',
+                        'thank you': 'ありがとうございます',
+                        'excuse me': 'すみません',
+                        'yes': 'はい',
+                        'no': 'いいえ',
+                        'today': '今日',
+                        'tomorrow': '明日',
+                        'weather': '天気',
+                        'busy': '忙しい'
+                    }
+                };
+
+                const isJa = this.isJapanese(text);
+                const dictKey = direction === 'auto' ? (isJa ? 'ja-en' : 'en-ja') : direction;
+                const dict = dictionary[dictKey] || {};
+                
+                const lowerText = text.toLowerCase();
+                for (let [key, value] of Object.entries(dict)) {
+                    if (lowerText.includes(key.toLowerCase())) {
+                        return value;
+                    }
+                }
+                
+                return `[辞書翻訳] ${text}`;
+            }
+
+            fallbackTranslation(text, direction) {
+                // 最終フォールバック
+                if (this.isJapanese(text)) {
+                    return `[English] ${text}`;
+                } else {
+                    return `[日本語] ${text}`;
+                }
+            }
+
+            isJapanese(text) {
+                return /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(text);
+            }
+
+            addToHistory(original, translated) {
+                const timestamp = new Date().toLocaleTimeString();
+                this.translationHistory.unshift({
+                    original,
+                    translated,
+                    timestamp
+                });
+
+                // 履歴を最大10件に制限
+                if (this.translationHistory.length > 10) {
+                    this.translationHistory = this.translationHistory.slice(0, 10);
+                }
+
+                this.updateHistoryDisplay();
+            }
+
+            updateHistoryDisplay() {
+                const historyEl = document.getElementById('translationHistory');
+                
+                if (this.translationHistory.length === 0) {
+                    historyEl.innerHTML = '<p class="text-gray-500 text-sm">翻訳履歴がここに表示されます</p>';
+                    return;
+                }
+
+                historyEl.innerHTML = this.translationHistory.map(item => `
+                    <div class="history-item">
+                        <div class="text-sm text-gray-600">${item.timestamp}</div>
+                        <div class="text-sm font-medium">${item.original}</div>
+                        <div class="text-sm text-blue-600">→ ${item.translated}</div>
+                    </div>
+                `).join('');
+            }
+
+            clearHistory() {
+                this.translationHistory = [];
+                this.updateHistoryDisplay();
+            }
+
+            startInfoTimer() {
+                this.infoInterval = setInterval(() => {
+                    this.infoTimer--;
+                    document.getElementById('infoTimer').textContent = `次の更新まで: ${this.infoTimer}秒`;
+                    
+                    if (this.infoTimer <= 0) {
+                        this.loadNextInfo();
+                        this.infoTimer = 30;
+                    }
+                }, 1000);
+            }
+
+            loadInitialInfo() {
+                this.loadNextInfo();
+            }
+
+            loadNextInfo() {
+                const infoList = [
+                    {
+                        title: "AI技術の最新動向",
+                        content: "ChatGPT、Claude、Geminiなどの大規模言語モデルが急速に進化し、プログラミング、文章作成、データ分析など様々な分野で活用されています。特にマルチモーダルAIにより、テキスト、画像、音声を統合的に処理できるようになりました。"
+                    },
+                    {
+                        title: "プログラミング言語トレンド",
+                        content: "2024年現在、Python、JavaScript、TypeScriptが人気の上位を占めています。Rustは安全性とパフォーマンスで注目を集め、Goは並行処理とクラウド開発で重宝されています。WebAssemblyも注目技術の一つです。"
+                    },
+                    {
+                        title: "クラウドサービス動向",
+                        content: "AWS、Microsoft Azure、Google Cloud Platformが三大クラウドとして競争を続けています。サーバーレス、コンテナ技術、AIサービスが重要なトレンドとなっており、マルチクラウド戦略も一般的になりました。"
+                    },
+                    {
+                        title: "Web3とブロックチェーン",
+                        content: "分散型アプリケーション(DApps)、NFT(非代替トークン)、DeFi(分散型金融)が注目されています。Ethereum、Solana、Polygonなどのプラットフォームが開発者に人気です。規制面でも各国で整備が進んでいます。"
+                    },
+                    {
+                        title: "サイバーセキュリティ動向",
+                        content: "ゼロトラストセキュリティ、多要素認証、AIを活用した脅威検知が重要になっています。ランサムウェア攻撃の増加により、バックアップとインシデント対応の重要性が高まっています。"
+                    },
+                    {
+                        title: "モバイル開発トレンド",
+                        content: "React Native、Flutter、Xamarinなどのクロスプラットフォーム開発が主流となっています。5G技術の普及により、AR/VRアプリケーションの開発も活発化しています。"
+                    },
+                    {
+                        title: "DevOpsとCI/CD",
+                        content: "GitHub Actions、GitLab CI、Jenkins、CircleCIなどのCI/CDツールが開発効率を向上させています。Infrastructure as Code(IaC)により、インフラ管理も自動化が進んでいます。"
+                    },
+                    {
+                        title: "量子コンピューティング",
+                        content: "IBM、Google、Microsoftが量子コンピューター開発を牽引しています。暗号化、最適化問題、機械学習分野での応用が期待されており、量子プログラミング言語も登場しています。"
+                    }
+                ];
+
+                const info = infoList[this.currentInfoIndex % infoList.length];
+                document.getElementById('relatedInfo').innerHTML = `
+                    <h4 class="font-bold text-lg mb-2">${info.title}</h4>
+                    <p class="leading-relaxed">${info.content}</p>
+                `;
+
+                this.currentInfoIndex++;
+                this.infoTimer = 30;
+            }
+        }
+
+        // アプリケーション初期化
+        document.addEventListener('DOMContentLoaded', () => {
+            new ConversationTranslator();
+        });
+    </script>
+</body>
+</html>
+    <script id="html_badge_script1">
+        window.__genspark_remove_badge_link = "https://www.genspark.ai/api/html_badge/" +
+            "remove_badge?token=To%2FBnjzloZ3UfQdcSaYfDsL3JcJmQqez3Zubk3iNOYN3Ghke6p%2B%2F8WYa7518t7ifcvgHqti%2BwuZD6YP9C%2FSHqiQluyhcySFcNITbBCxSTBRBzqfyPR%2BvexnYd51vd8ONxDXbGk1G%2BxWjSvslStv1T9LQHRDcQwfFm2zGysKCjFQfDyISwvxPGCO0Ncu6kmLc0bl0Rex1pSgQ%2BhOebRroo2yLer58uSBkrXlC3ZizGD8%2FVq36WH%2Fki3S%2BnSxMi%2F%2B1G%2FGuh%2FSPUzFlVkvxa5Crspw%2FQ7DuDdn7lIARK255AV5aOSekjTayu2C6lQYQSZRf%2FNl%2BwP7Q52ll1YLu0SMMrtUrGP2FmwUrZp9xwltVhRv6uZoglqv%2FHZ12ONMT0bBQG9I%2BS5wOInjbpt5mhCdEJ2wIz43IM6mesYvvQo%2FrJX9%2FhYglEto0Qp7puqlEuc9Pfgs0jdlUKTu3KA0mfe%2FW3le9gaLhsZbKqqb7N8IP%2B13HO7FltIpTHpsVNXUyNzK15D1Zkf5irfiN0UcztjrVsFkqdpbVzuVPMEpljQo9PGA%3D";
+        window.__genspark_locale = "ja-JP";
+        window.__genspark_token = "To/BnjzloZ3UfQdcSaYfDsL3JcJmQqez3Zubk3iNOYN3Ghke6p+/8WYa7518t7ifcvgHqti+wuZD6YP9C/SHqiQluyhcySFcNITbBCxSTBRBzqfyPR+vexnYd51vd8ONxDXbGk1G+xWjSvslStv1T9LQHRDcQwfFm2zGysKCjFQfDyISwvxPGCO0Ncu6kmLc0bl0Rex1pSgQ+hOebRroo2yLer58uSBkrXlC3ZizGD8/Vq36WH/ki3S+nSxMi/+1G/Guh/SPUzFlVkvxa5Crspw/Q7DuDdn7lIARK255AV5aOSekjTayu2C6lQYQSZRf/Nl+wP7Q52ll1YLu0SMMrtUrGP2FmwUrZp9xwltVhRv6uZoglqv/HZ12ONMT0bBQG9I+S5wOInjbpt5mhCdEJ2wIz43IM6mesYvvQo/rJX9/hYglEto0Qp7puqlEuc9Pfgs0jdlUKTu3KA0mfe/W3le9gaLhsZbKqqb7N8IP+13HO7FltIpTHpsVNXUyNzK15D1Zkf5irfiN0UcztjrVsFkqdpbVzuVPMEpljQo9PGA=";
+    </script>
+    
+    <script id="html_notice_dialog_script" src="https://www.genspark.ai/notice_dialog.js"></script>
+    
